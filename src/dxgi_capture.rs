@@ -120,7 +120,6 @@ mod tests {
                     rect: (0, 0, width, height),
                 });
 
-                let display_mat = dxgi.get_threshold_mat(&display_mat, 128);
                 // 创建窗口并显示
                 let window_name = "Rust OpenCV Display";
                 highgui::named_window(window_name, highgui::WINDOW_AUTOSIZE).unwrap();
