@@ -1,4 +1,4 @@
-use log::error;
+use log::{error, info};
 use windows::Win32::Foundation::{HWND, LPARAM};
 use windows::Win32::UI::WindowsAndMessaging::{EnumWindows, FindWindowW, GetWindowTextW};
 use windows::core::{BOOL, HSTRING, PCWSTR};
@@ -61,12 +61,16 @@ pub fn search_window_by_title(window_name: &str) -> Option<HWND> {
     finder.found_hwnd
 }
 
-pub fn update_window(window_title: &str) {
+pub fn update_window(window_title: &str)->Option<HWND> {
     if let Some(hwnd) = find_window_by_title(window_title) {
+        info!("Try updating window {}", window_title);
         unsafe {
             let _ = windows::Win32::Graphics::Gdi::InvalidateRect(Some(hwnd), None, true);
             let _ = windows::Win32::Graphics::Gdi::UpdateWindow(hwnd);
         }
+        Some(hwnd)
+    }else{
+        None
     }
 }
 
@@ -74,10 +78,10 @@ pub fn update_window(window_title: &str) {
 mod tests {
     use super::*;
     use crate::logging;
-    use log::info;
+    use log::{info, LevelFilter};
     #[test]
     fn test_find_window_by_title() {
-        logging::init_logger();
+        let _logger = logging::init_logger("debug");
         // This test assumes that there is a window with the title "Untitled - Notepad"
         // Make sure to open Notepad with that title before running the test
         if let Some(hwnd) = find_window_by_title("PHANTASY STAR ONLINE 2 NEW GENESIS") {
@@ -88,7 +92,7 @@ mod tests {
 
     #[test]
     fn test_search_window_by_title() {
-        logging::init_logger();
+        let _logger = logging::init_logger("debug");
         // This test assumes that there is a window with the title "Untitled - Notepad"
         // Make sure to open Notepad with that title before running the test
         let hwnd_option = search_window_by_title("PHANTASY STAR ONLINE 2");

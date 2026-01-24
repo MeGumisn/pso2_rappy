@@ -38,6 +38,7 @@ impl WindowsKeyboard {
                 Some(LPARAM(0isize)),
             );
         }
+        sleep(Duration::from_millis(random_range(50..=100)));
     }
 
     pub fn is_scroll_lock_on() -> bool {
