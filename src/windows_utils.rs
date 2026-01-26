@@ -78,7 +78,7 @@ pub fn update_window(window_title: &str)->Option<HWND> {
 mod tests {
     use super::*;
     use crate::logging;
-    use log::{info, LevelFilter};
+    use log::info;
     #[test]
     fn test_find_window_by_title() {
         let _logger = logging::init_logger("debug");

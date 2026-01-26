@@ -1,0 +1,36 @@
+[package]
+name = "pso2_rappy_machine"
+version = "0.1.0"
+edition = "2024"
+build = "build.rs"
+
+[profile.release]
+lto = true
+strip = true
+opt-level = 3
+panic = "abort"
+codegen-units = 1
+debug = "none"
+
+[package.metadata.windows_subsystem]
+windows = "windows"
+
+[dependencies]
+log = "0.4.29"
+# simple_logger = { version = "5.1.0",features = ["timestamps","stderr"] }
+flexi_logger = { version = "^0.31", features = ["default"] }
+
+# windows 获取窗口 hwnd
+windows = { version = "0.62.2", features = ["Win32_UI_WindowsAndMessaging", "Win32_Graphics", "Win32_Graphics_Gdi", "Win32_UI_Input", "Win32_UI_Input_KeyboardAndMouse"] }
+# dxgi dll调用
+memory-module-sys = "0.3.0"
+
+opencv = "0.95.1"
+rand = "0.10.0-rc.7"
+chrono = "0.4.43"
+eframe = "0.33.3"
+egui = "0.33.3"
+image = "0.25.9"
+
+[build-dependencies]
+winresource = "^0.1"
