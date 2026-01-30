@@ -1,6 +1,6 @@
 #![cfg_attr(windows, windows_subsystem = "windows")]
 
-use crate::auto_rappy::{check_or_create_dir, QTE_DIR, TARGET_DIR};
+use crate::auto_rappy::{QTE_DIR, TARGET_DIR, check_or_create_dir};
 use crate::keyboard_utils::WindowsKeyboard;
 use crate::logging::init_logger;
 use eframe::egui;
@@ -43,12 +43,58 @@ impl eframe::App for RappyApp {
         // 1. 处理接收到的日志
         while let Ok(msg) = self.rx.try_recv() {
             let date_time = chrono::Local::now().format("%Y-%m-%d %H:%M:%S");
-            self.logs.push_str(&format!("{}: {}\n", date_time.to_string(), msg));
+            // 1. 檢查目前行數
+            let line_count = self.logs.lines().count();
+
+            // 2. 如果已經達到或超過 20 條，移除第一行
+            if line_count >= 20 {
+                if let Some(first_newline_pos) = self.logs.find('\n') {
+                    // 移除從開頭到第一個換行符號（含）的內容
+                    self.logs.replace_range(..first_newline_pos + 1, "");
+                }
+            }
+            self.logs
+                .push_str(&format!("{}: {}\n", date_time.to_string(), msg));
         }
 
         egui::CentralPanel::default().show(ctx, |ui| {
-            ui.heading("Happy Rappy Machine");
+            ctx.style_mut(|s| s.interaction.tooltip_delay = 0.1);
+            let label_text = egui::RichText::new("❓ Usage Instructions").underline();
+            let label = ui.add(egui::Label::new(label_text).sense(egui::Sense::click()));
+            // 使用 on_hover_ui 來實現標準格式
+            label.on_hover_ui(|ui| {
+                ui.set_max_width(300.0); // 限制寬度，避免長文本變成一橫條
 
+                ui.vertical(|ui| {
+                    ui.heading("Configuration Steps");
+                    ui.add_space(4.0);
+
+                    // 第 1 點
+                    ui.strong("1. System Requirements");
+                    ui.label("• Resolution: 3840x2160");
+                    ui.label("• DPI Scaling: 150% (Important)");
+                    ui.separator();
+
+                    // 第 2 點
+                    ui.strong("2. In-Game Settings");
+                    ui.label("• Mode: 1600x900 Windowed");
+                    ui.horizontal(|ui| {
+                        ui.label("• Path:");
+                        ui.code("Options > Controls > Guide");
+                    });
+                    ui.label("• Set to: 'Keyboard Type'");
+                    ui.separator();
+
+                    // 第 3 & 4 點
+                    ui.strong("3. Execution");
+                    ui.label("Enter Rappy Machine -> Click 'Start Task'");
+
+                    ui.add_space(4.0);
+                    ui.colored_label(egui::Color32::GRAY, "Click label for full details");
+                });
+            });
+
+            ui.separator();
             // 2. 开始/停止 按钮
             let (button_label, button_color) = if self.is_running {
                 ("⏸ Stop Task", egui::Color32::from_rgb(200, 60, 60)) // 红色
@@ -59,11 +105,12 @@ impl eframe::App for RappyApp {
             let button_design = egui::Button::new(
                 egui::RichText::new(button_label)
                     .color(egui::Color32::WHITE) // 文字设为白色
-                    .strong()                    // 文字加粗
-                    .size(30.0)
-            ).fill(button_color)                // 设置按钮背景色
-                .corner_radius(10)
-                .min_size(egui::vec2(240.0,70.0));
+                    .strong() // 文字加粗
+                    .size(30.0),
+            )
+            .fill(button_color) // 设置按钮背景色
+            .corner_radius(10)
+            .min_size(egui::vec2(240.0, 70.0));
 
             if ui.add(button_design).clicked() {
                 self.is_running = !self.is_running;
@@ -128,7 +175,7 @@ fn main() -> Result<(), Error> {
         ..Default::default()
     };
     let _ = eframe::run_native(
-        "Rappy Machine UI",
+        "Happy Rappy Machine",
         options,
         Box::new(|cc| Ok(Box::new(RappyApp::new(cc)))),
     );
