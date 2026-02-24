@@ -21,7 +21,7 @@ log = "0.4.29"
 flexi_logger = { version = "^0.31", features = ["default"] }
 
 # windows 获取窗口 hwnd
-windows = { version = "0.62.2", features = ["Win32_UI_WindowsAndMessaging", "Win32_Graphics", "Win32_Graphics_Gdi", "Win32_UI_Input", "Win32_UI_Input_KeyboardAndMouse"] }
+windows = { version = "0.62.2", features = ["Win32_UI_WindowsAndMessaging", "Win32_Graphics", "Win32_Graphics_Gdi", "Win32_UI_Input", "Win32_UI_Input_KeyboardAndMouse","Win32_Graphics_Dwm"] }
 # dxgi dll调用
 memory-module-sys = "0.3.0"
 

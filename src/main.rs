@@ -1,6 +1,6 @@
 #![cfg_attr(windows, windows_subsystem = "windows")]
 
-use crate::auto_rappy::{QTE_DIR, TARGET_DIR, check_or_create_dir};
+use crate::auto_rappy::{check_or_create_dir, QTE_DIR, TARGET_DIR};
 use crate::keyboard_utils::WindowsKeyboard;
 use crate::logging::init_logger;
 use eframe::egui;
@@ -121,7 +121,18 @@ impl eframe::App for RappyApp {
                     let ctx_clone = ctx.clone(); // 用于在子线程触发 UI 刷新
                     // 模拟后台任务
                     thread::spawn(move || {
-                        let _ = auto_rappy::auto_rappy(&ctx_clone, &tx);
+                        match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                            let _ = auto_rappy::auto_rappy(&ctx_clone, &tx);
+                        })) {
+                            Ok(_) => {
+                                log::info!("Auto rappy task completed normally");
+                            }
+                            Err(_e) => {
+                                log::error!("Auto rappy task panicked");
+                                let _ = tx.send("Task error: program encountered an unexpected issue".to_string());
+                            }
+                        }
+                        WindowsKeyboard::stop_app();
                     });
                 } else {
                     WindowsKeyboard::stop_app();
@@ -163,6 +174,23 @@ fn load_icon(bytes: &[u8]) -> egui::IconData {
 }
 
 fn main() -> Result<(), Error> {
+    // 设置全局恐慌处理器
+    std::panic::set_hook(Box::new(|panic_info| {
+        let msg = if let Some(s) = panic_info.payload().downcast_ref::<&str>() {
+            *s
+        } else if let Some(s) = panic_info.payload().downcast_ref::<String>() {
+            s.as_str()
+        } else {
+            "Unknown panic"
+        };
+
+        let location = panic_info.location()
+            .map(|l| format!("{}:{}:{}", l.file(), l.line(), l.column()))
+            .unwrap_or_else(|| "Unknown location".to_string());
+
+        log::error!("Program panic: {} at {}", msg, location);
+    }));
+
     let _logger = init_logger("info");
     let icon_bytes = include_bytes!("../resources/ico/rappy.ico");
     let icon = load_icon(icon_bytes);
