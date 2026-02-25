@@ -40,6 +40,7 @@ impl RappyApp {
 
 impl eframe::App for RappyApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        ctx.request_repaint();
         // 1. 处理接收到的日志
         while let Ok(msg) = self.rx.try_recv() {
             let date_time = chrono::Local::now().format("%Y-%m-%d %H:%M:%S");

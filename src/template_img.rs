@@ -58,7 +58,7 @@ mod tests {
 
     #[test]
     fn test_decode_gray() {
-        let temp_img = TemplateImg::QTE;
+        let temp_img = TemplateImg::TARGET;
         show_image(&temp_img.img);
     }
 }

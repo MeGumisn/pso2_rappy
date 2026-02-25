@@ -6,7 +6,7 @@ use crate::rappy_checker::get_threshold_mat;
 use crate::template_img::TemplateImg;
 use crate::windows_utils::{get_window_client_offset, search_window_by_title, update_window};
 use egui::Context;
-use log::{debug, error, info};
+use log::{error, info};
 use opencv::core::{Mat, MatTraitConst, Size, Vector, min_max_loc, no_array};
 use opencv::imgcodecs::imwrite;
 use opencv::imgproc::{INTER_LINEAR, TM_CCORR_NORMED, match_template, resize};
@@ -73,21 +73,21 @@ fn check_game_shot(
 ) -> bool {
     if threshed {
         let game_shot = capture.grab(capture_pos);
-        if cfg!(debug_assertions) {
-            // show_image(&game_shot);
-        }
         let game_shot = get_threshold_mat(&game_shot, IMG_THRESH);
         let img = get_threshold_mat(&template_img.img, IMG_THRESH);
 
         let is_gray = game_shot.channels() == 1;
-        let sim = rappy_checker::get_ssim(&game_shot, &img, is_gray).unwrap();
-        // info!("Sim: {}", sim);
+        let sim = rappy_checker::get_ssim(&game_shot, &img, is_gray).unwrap_or_default();
+        #[cfg(test)]
+        {
+            info!("Sim: {}", sim);
+        }
         sim > sim_threshold
     } else {
         let game_shot = capture.grab_gray(capture_pos);
         let img = &template_img.img;
         let is_gray = game_shot.channels() == 1;
-        let sim = rappy_checker::get_ssim(&game_shot, img, is_gray).unwrap();
+        let sim = rappy_checker::get_ssim(&game_shot, img, is_gray).unwrap_or_default();
         info!("Sim: {}", sim);
         sim > sim_threshold
     }
@@ -99,14 +99,14 @@ struct AutoRappy {
 }
 
 impl AutoRappy {
-    fn check_qte_appear(&self, capture: &DxgiCapture, tx: &Sender<String>) -> bool {
-        if cfg!(debug_assertions) {
-            // show_image(&game_shot);
-            debug!("Checking qte appear...");
-        }
+    fn check_qte_appear<'a>(
+        &self,
+        capture: &DxgiCapture,
+        tx: &'a Sender<String>,
+    ) -> (bool, Option<Box<dyn Fn() + 'a>>) {
         let rappy_qte_shot = capture.grab_gray(&CapturePos::qte(self.offset_x, self.offset_y));
         let mut resized_rappy_qte_shot = Mat::default();
-        
+
         if resize(
             &rappy_qte_shot,
             &mut resized_rappy_qte_shot,
@@ -114,11 +114,13 @@ impl AutoRappy {
             0.5,
             0.5,
             INTER_LINEAR,
-        ).is_err() {
+        )
+        .is_err()
+        {
             error!("Failed to resize QTE image");
-            return false;
+            return (false, None);
         }
-        
+
         let mut res_mat = Mat::default();
         if match_template(
             &resized_rappy_qte_shot,
@@ -126,36 +128,40 @@ impl AutoRappy {
             &mut res_mat,
             TM_CCORR_NORMED,
             &no_array(),
-        ).is_err() {
+        )
+        .is_err()
+        {
             error!("Failed to match template for QTE");
-            return false;
+            return (false, None);
         }
-        
+
         let mut max_val = 0f64;
         if min_max_loc(&res_mat, None, Some(&mut max_val), None, None, &no_array()).is_err() {
             error!("Failed to find max value in match result");
-            return false;
+            return (false, None);
         }
-        
+
         if max_val > 0.99 {
-            // 生成时间戳文件名
-            let png_name = chrono::Local::now().format("%Y%m%d%H%M%S%.6f").to_string();
-            info!("qte name:{}, sim: {:.6}", png_name, max_val);
-            let _ = tx.send(format!("qte name:{}, sim: {:.6}", png_name, max_val));
-            // 确保目录存在 (Rust 不会自动创建目录，需使用 std::fs::create_dir_all)
-            let file_path = format!("{}/{}.png", QTE_DIR, png_name);
-            // 保存图片 (params 传空 Vector)
-            info!("qte image name: {}, sim: {}.", file_path, max_val);
-            let _ = tx.send(format!(
-                "Save qte image, image path: {}, sim: {}",
-                file_path, max_val
-            ));
-            if imwrite(&file_path, &resized_rappy_qte_shot, &Vector::new()).is_err() {
-                error!("Failed to save QTE image to {}", file_path);
-            }
-            return true;
+            let save_img_function = move || {
+                // 生成时间戳文件名
+                let png_name = chrono::Local::now().format("%Y%m%d%H%M%S%.6f").to_string();
+                info!("qte name:{}, sim: {:.6}", png_name, max_val);
+                let _ = tx.send(format!("qte name:{}, sim: {:.6}", png_name, max_val));
+                // 确保目录存在 (Rust 不会自动创建目录，需使用 std::fs::create_dir_all)
+                let file_path = format!("{}/{}.png", QTE_DIR, png_name);
+                // 保存图片 (params 传空 Vector)
+                info!("qte image name: {}, sim: {}.", file_path, max_val);
+                let _ = tx.send(format!(
+                    "Save qte image, image path: {}, sim: {}",
+                    file_path, max_val
+                ));
+                if imwrite(&file_path, &resized_rappy_qte_shot, &Vector::new()).is_err() {
+                    error!("Failed to save QTE image to {}", file_path);
+                }
+            };
+            return (true, Some(Box::new(save_img_function)));
         }
-        false
+        (false, None)
     }
 
     fn wait_for_key_ready(
@@ -165,12 +171,13 @@ impl AutoRappy {
         tx: &Sender<String>,
     ) {
         info!("Waiting for key ready...");
-        tx.send("Waiting for Key ready.".to_string()).unwrap();
-        
+        tx.send("Waiting for Key ready.".to_string())
+            .unwrap_or_default();
+
         // 添加超时机制，最多等待60秒
         let start_time = std::time::Instant::now();
         let timeout = Duration::from_secs(60);
-        
+
         // scroll灯亮起但游戏中开始(回车键)不可用，等待
         while !check_game_shot(
             capture,
@@ -200,7 +207,7 @@ impl AutoRappy {
             "Key ready, [(bet coin nums == 1) : {}]",
             *bet_coin_is_one
         ))
-        .unwrap();
+        .unwrap_or_default();
     }
 
     fn try_increase_coin_while_energy_is_four(
@@ -219,19 +226,19 @@ impl AutoRappy {
             "Trying to increase coin for the keyboard, bet coin is one: {}.",
             bet_coin_is_one
         ))
-        .unwrap();
+        .unwrap_or_default();
         if *bet_coin_is_one
             && check_game_shot(
                 capture,
                 &CapturePos::energy_four(self.offset_x, self.offset_y),
                 &TemplateImg::ENERGY_FOUR,
-                0.85,
-                true,
+                0.9,
+                false,
             )
         {
             info!("Bet coin = 1,  energy = 4, increase bet coin.");
             tx.send("Bet coin = 1,  energy = 4, increase bet coin.".to_string())
-                .unwrap();
+                .unwrap_or_default();
             // 没到5枚硬币时连续按上键(最大20次)
             for i in 0..=20 {
                 if !check_game_shot(
@@ -251,12 +258,14 @@ impl AutoRappy {
                 }
             }
             info!("Increase bet coin finished");
-            tx.send("Increase bet coin finished".to_string()).unwrap();
+            tx.send("Increase bet coin finished".to_string())
+                .unwrap_or_default();
             // 已经执行增加coin操作, bet_coin_one设置为false
             *bet_coin_is_one = false;
         } else {
             info!("No need to increase coin.");
-            tx.send("No need to increase coin.".to_string()).unwrap();
+            tx.send("No need to increase coin.".to_string())
+                .unwrap_or_default();
         }
     }
 
@@ -275,19 +284,19 @@ impl AutoRappy {
             "Trying to decrease coin for the keyboard, bet coin is one: {}.",
             bet_coin_is_one
         ))
-        .unwrap();
+        .unwrap_or_default();
         if !*bet_coin_is_one
             && check_game_shot(
                 &capture,
                 &CapturePos::energy_zero(self.offset_x, self.offset_y),
                 &TemplateImg::ENERGY_ZERO,
-                0.85,
-                true,
+                0.9,
+                false,
             )
         {
             info!("Bet coin > 1,  energy = 0, decrease bet coin.");
             tx.send("Bet coin > 1,  energy = 0, decrease bet coin.".to_string())
-                .unwrap();
+                .unwrap_or_default();
             for _i in 0..=20 {
                 if !check_game_shot(
                     &capture,
@@ -302,11 +311,18 @@ impl AutoRappy {
             *bet_coin_is_one = true;
         } else {
             info!("No need to decrease coin.");
-            tx.send("No need to decrease coin.".to_string()).unwrap();
+            tx.send("No need to decrease coin.".to_string())
+                .unwrap_or_default();
         }
     }
 
-    fn process_rappy_qte(&self, capture: &DxgiCapture, burst: &mut bool, tx: &Sender<String>) {
+    fn process_rappy_qte<'a>(
+        &self,
+        capture: &DxgiCapture,
+        burst: &mut bool,
+        tx: &Sender<String>,
+        action: Box<dyn Fn() + 'a>,
+    ) {
         info!(
             "Check if  processing rappy qte needed, rappy burst status: {}.",
             *burst
@@ -315,41 +331,52 @@ impl AutoRappy {
             "Check if  processing rappy qte needed, rappy burst status: {}.",
             *burst
         ))
-        .unwrap();
+        .unwrap_or_default();
         if check_game_shot(
             capture,
             &CapturePos::target(self.offset_x, self.offset_y),
             &TemplateImg::TARGET,
             0.7,
-            true,
+            false,
         ) || *burst
         {
             info!("Rappy target appear, wait for qte.");
             tx.send("Rappy target appear, wait for qte.".to_string())
-                .unwrap();
+                .unwrap_or_default();
             // 等qte完全开始
             sleep(Duration::from_millis(3000));
-            
+
             // 添加超时机制，最多等待30秒
             let start_time = std::time::Instant::now();
             let timeout = Duration::from_secs(30);
-            
-            while !self.check_qte_appear(capture, tx) {
-                if start_time.elapsed() > timeout {
-                    error!("QTE detection timeout after 30 seconds");
-                    let _ = tx.send("QTE detection timeout after 30 seconds".to_string());
-                    *burst = false;
-                    return;
+            loop {
+                let (appear, save_function) = self.check_qte_appear(capture, tx);
+                if !appear {
+                    if start_time.elapsed() > timeout {
+                        error!("QTE detection timeout after 30 seconds");
+                        let _ = tx.send("QTE detection timeout after 30 seconds".to_string());
+                        *burst = false;
+                        return;
+                    }
+                    sleep(Duration::from_millis(100));
+                } else {
+                    // 先按键
+                    action();
+                    info!("Qte appear, enter key pressed");
+                    // 再保存图片
+                    save_function.unwrap_or(Box::new(|| {}))();
+                    break;
                 }
-                sleep(Duration::from_millis(100));
             }
             info!("qte appear, ready.");
-            tx.send("qte appear, ready.".to_string()).unwrap();
+            tx.send("qte appear, ready.".to_string())
+                .unwrap_or_default();
             // 出现QTE, 排除掉rappy burst的可能
             *burst = false;
         } else {
             info!("No rappy qte appear.");
-            tx.send("No rappy qte appear.".to_string()).unwrap();
+            tx.send("No rappy qte appear.".to_string())
+                .unwrap_or_default();
         }
     }
 }
@@ -375,7 +402,8 @@ pub fn auto_rappy(ctx: &Context, tx: &Sender<String>) -> Result<String, Error> {
                     "Start task, check bet coin nums == 1: {}",
                     bet_coin_is_one
                 ))
-                .unwrap();
+                .unwrap_or_default();
+                ctx.request_repaint();
                 // pse burst状态, 初始为false
                 let mut burst = false;
                 let mut keyboard = WindowsKeyboard::new(hwnd);
@@ -391,6 +419,7 @@ pub fn auto_rappy(ctx: &Context, tx: &Sender<String>) -> Result<String, Error> {
                             &mut burst,
                             tx,
                         );
+                        ctx.request_repaint();
                         // 赌场币不为1枚，能力不足4格，将赌场币降低到1
                         auto_rappy.try_decrease_coin_while_energy_is_zero(
                             &capture,
@@ -398,7 +427,14 @@ pub fn auto_rappy(ctx: &Context, tx: &Sender<String>) -> Result<String, Error> {
                             &mut bet_coin_is_one,
                             tx,
                         );
-                        auto_rappy.process_rappy_qte(&capture, &mut burst, tx);
+                        ctx.request_repaint();
+                        auto_rappy.process_rappy_qte(
+                            &capture,
+                            &mut burst,
+                            tx,
+                            Box::new(|| keyboard.play_rappy()),
+                        );
+                        ctx.request_repaint();
                         if check_game_shot(
                             &capture,
                             &CapturePos::key_ready(offset_x, offset_y),
@@ -407,7 +443,8 @@ pub fn auto_rappy(ctx: &Context, tx: &Sender<String>) -> Result<String, Error> {
                             true,
                         ) {
                             info!("Press enter key.");
-                            tx.send("Press enter key.".to_string()).unwrap();
+                            tx.send("Press enter key.".to_string()).unwrap_or_default();
+                            ctx.request_repaint();
                             keyboard.play_rappy();
                         }
                         if !check_game_shot(
@@ -426,7 +463,8 @@ pub fn auto_rappy(ctx: &Context, tx: &Sender<String>) -> Result<String, Error> {
                             // 画面错位，刷新下这个窗口试下
                             info!("Invalid window handle, updating window...");
                             tx.send("Invalid window handle, updating window...".to_string())
-                                .unwrap();
+                                .unwrap_or_default();
+                            ctx.request_repaint();
                             if let Some(_hwnd) = update_window(&window_name) {
                                 capture.update_hwnd(_hwnd);
                                 keyboard = WindowsKeyboard::new(_hwnd);
@@ -451,17 +489,21 @@ pub fn auto_rappy(ctx: &Context, tx: &Sender<String>) -> Result<String, Error> {
 
 #[cfg(test)]
 mod tests {
+    use opencv::core::Rect;
     use super::*;
     use crate::dxgi_capture::show_image;
+    use crate::logging::init_logger;
     use crate::windows_utils::get_window_client_offset;
+    use opencv::imgcodecs::imread;
 
     #[test]
     fn test_grab_and_check() -> Result<(), Error> {
+        init_logger("debug");
         match search_window_by_title("PHANTASY STAR ONLINE 2") {
             Some(hwnd) => {
                 let capture = DxgiCapture::new(hwnd)?;
                 info!("Check key ready");
-                let template = TemplateImg::KEY_READY;
+                let template = TemplateImg::ENERGY_FOUR;
                 let img = &template.img;
                 info!(
                     "Template image channel: {}, rows: {}, cols: {}",
@@ -472,10 +514,10 @@ mod tests {
                 if let Some((offset_x, offset_y)) = get_window_client_offset(hwnd) {
                     let is_similar = check_game_shot(
                         &capture,
-                        &CapturePos::key_ready(offset_x, offset_y),
+                        &CapturePos::energy_four(offset_x, offset_y),
                         &template,
-                        0.85,
-                        true,
+                        0.9,
+                        false,
                     );
                     info!("Similar key_ready_shot: {}", is_similar);
                 }
@@ -517,5 +559,57 @@ mod tests {
             }
             None => Ok(()),
         }
+    }
+
+    #[test]
+    fn test_match_qte_from_picture() -> Result<(), Error> {
+        init_logger("debug");
+        if let Ok(qte_img) = imread("H:/RustProjects/pso2_rappy_machine/test_data/qte.jpg", opencv::imgcodecs::IMREAD_GRAYSCALE)
+        {
+            let rappy_qte_shot = qte_img.roi(CapturePos::qte(0,0).rect.into()).unwrap();
+            let mut resized_rappy_qte_shot = Mat::default();
+
+            if resize(
+                &rappy_qte_shot,
+                &mut resized_rappy_qte_shot,
+                Size::new(0, 0),
+                0.5,
+                0.5,
+                INTER_LINEAR,
+            )
+            .is_err()
+            {
+                error!("Failed to resize QTE image");
+            }
+
+            let mut res_mat = Mat::default();
+            if match_template(
+                &resized_rappy_qte_shot,
+                &TemplateImg::QTE.img,
+                &mut res_mat,
+                TM_CCORR_NORMED,
+                &no_array(),
+            )
+            .is_err()
+            {
+                error!("Failed to match template for QTE");
+            }
+
+            let mut max_val = 0f64;
+            if min_max_loc(&res_mat, None, Some(&mut max_val), None, None, &no_array()).is_err() {
+                error!("Failed to find max value in match result");
+            }
+
+            if max_val > 0.99 {
+                // 生成时间戳文件名
+                let png_name = chrono::Local::now().format("%Y%m%d%H%M%S%.6f").to_string();
+                info!("qte name:{}, sim: {:.6}", png_name, max_val);
+                // 确保目录存在 (Rust 不会自动创建目录，需使用 std::fs::create_dir_all)
+                let file_path = format!("{}/{}.png", QTE_DIR, png_name);
+                // 保存图片 (params 传空 Vector)
+                info!("qte image name: {}, sim: {}.", file_path, max_val);
+            }
+        }
+        Ok(())
     }
 }

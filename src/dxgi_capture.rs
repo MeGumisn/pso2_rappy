@@ -159,6 +159,25 @@ pub fn show_image(display_mat: &Mat) {
 }
 
 #[cfg(test)]
+pub fn show_as_video(img_generator: Box<dyn Fn()->Result<Mat, Error>>) {
+    use opencv::highgui;
+    loop {
+        // 3. 抓取一幀截圖
+        if let Ok(frame) = img_generator() {
+            // 4. 將 BGRA 數據轉為 Mat
+            // 注意：大多數截圖庫返回的是平鋪的 u8 數組
+
+            // 5. 顯示影像
+            highgui::imshow("Screen Stream", &frame).unwrap();
+        }
+
+        // 6. 必須調用 wait_key 否則窗口不會刷新，且能監控退出鍵（如 ESC）
+        let key = highgui::wait_key(1).unwrap();
+        if key == 27 { break; }
+    }
+}
+
+#[cfg(test)]
 mod tests {
     use super::*;
     use crate::logging::init_logger;
@@ -176,6 +195,26 @@ mod tests {
                     rect: (0, 0, 1600, 954),
                 });
                 show_image(&display_mat);
+            }
+            _ => {
+                error!("Window not found");
+            }
+        }
+    }
+
+    #[test]
+    fn test_dxgi_capture_as_video() {
+        let _logger = init_logger("debug");
+        match search_window_by_title("PHANTASY") {
+            Some(hwnd) => {
+                let dxgi = DxgiCapture::new(hwnd).unwrap();
+                if let Some((offset_x, offset_y)) = crate::windows_utils::get_window_client_offset(hwnd) {
+                    info!("Window client offset: ({}, {})", offset_x, offset_y);
+                    show_as_video(Box::new(move || Ok(dxgi.grab(&CapturePos::energy_zero(offset_x,offset_y)))));
+                } else {
+                    error!("Failed to get window client offset");
+                }
+
             }
             _ => {
                 error!("Window not found");
